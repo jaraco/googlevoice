@@ -43,9 +43,7 @@ class TestVoice:
             ...
             <input type="hidden" name="gxf" value="{random_gxf}">
             ...
-            """.format(
-                **locals()
-            ),
+            """.format(**locals()),
         )
         responses.add(
             responses.POST,
