@@ -15,7 +15,7 @@ class Config(configparser.ConfigParser):
 
         if not os.path.exists(self.fname):
             try:
-                with open(self.fname, 'w') as f:
+                with open(self.fname, 'w', encoding='utf-8') as f:
                     f.write(settings.DEFAULT_CONFIG)
             except OSError:
                 return
@@ -23,7 +23,7 @@ class Config(configparser.ConfigParser):
         configparser.ConfigParser.__init__(self)
 
         try:
-            self.read([self.fname])
+            self.read([self.fname], encoding='utf-8')
         except OSError:
             return
 
@@ -47,7 +47,7 @@ class Config(configparser.ConfigParser):
             return
 
     def save(self):
-        with open(self.fname, 'w') as f:
+        with open(self.fname, 'w', encoding='utf-8') as f:
             self.write(f)
 
     forwardingNumber = property(lambda self: self.get('forwardingNumber'))
