@@ -4,6 +4,7 @@ import importlib.metadata
 import logging
 import platform
 import re
+from collections.abc import Mapping
 
 import requests
 
@@ -306,16 +307,17 @@ class Voice:
             method, url, data=data, params=terms or None, headers=headers
         )
 
-    def __validate_special_page(self, page, data={}, **kwargs):
+    def __validate_special_page(self, page, data: Mapping = {}, **kwargs):
         """
         Validates a given special page for an 'ok' response
         """
-        data.update(kwargs)
-        util.load_and_validate(self.__do_special_page(page, data))
+        util.load_and_validate(self.__do_special_page(page, dict(data) | kwargs))
 
     _Phone__validate_special_page = __validate_special_page
 
-    def __do_special_page(self, page, data=None, headers={}, terms={}):
+    def __do_special_page(
+        self, page, data=None, headers: Mapping = {}, terms: Mapping = {}
+    ):
         """
         Add self.special to request data
         """
@@ -328,7 +330,9 @@ class Voice:
 
     _Phone__do_special_page = __do_special_page
 
-    def __get_xml_page(self, page, data=None, headers={}, terms={}):
+    def __get_xml_page(
+        self, page, data=None, headers: Mapping = {}, terms: Mapping = {}
+    ):
         """
         Return XMLParser instance generated from given page
         """
