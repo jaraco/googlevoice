@@ -3,6 +3,7 @@ import logging
 import getpass
 import base64
 import platform
+import importlib.metadata
 
 from .conf import config
 from . import settings
@@ -18,15 +19,19 @@ if settings.DEBUG:
 log = logging.getLogger(__name__)
 
 
+def _gen_user_agent():
+    version = importlib.metadata.version('googlevoice')
+    pyver = platform.python_version()
+    return f'googlevoice/{version} Python/{pyver}'
+
+
 class Voice(object):
     """
     Main voice instance for interacting with the Google Voice service
     Handles login/logout and most of the baser HTTP methods
     """
 
-    user_agent = 'googlevoice/{__version__} Python/{pyver}'.format(
-        pyver=platform.python_version(), **vars(__import__('googlevoice'))
-    )
+    user_agent = _gen_user_agent()
 
     def __init__(self):
         self.session = requests.Session()
