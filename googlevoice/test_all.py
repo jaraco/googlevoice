@@ -109,7 +109,7 @@ class TestVoice:
 
     def test_zlogout(self, voice):
         voice.logout()
-        voice.special is None
+        assert voice.special is None
 
 
 class TestConfig:
