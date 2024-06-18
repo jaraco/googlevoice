@@ -145,7 +145,7 @@ def search(voice):
 
 
 def download(voice):
-    print('MP3 downloaded to %s' % voice.download(input('Message sha1: ')))
+    print('MP3 downloaded to {}'.format(voice.download(input('Message sha1: '))))
 
 
 def handle_action(voice, action):

@@ -23,21 +23,19 @@ def main():
 
     conf_default = '/etc/asterisk/extensions_custom.conf'
     conf = input(
-        """Asterisk dialplan configuration file
-        [Default %s]: """
-        % conf_default
+        f"""Asterisk dialplan configuration file
+        [Default {conf_default}]: """
     )
 
     if not conf.strip():
         conf = conf_default
 
     print(
-        """
-    Your Google Voice entries are stored in %s
+        f"""
+    Your Google Voice entries are stored in {conf}
     Edit that file and reload your Asterisk dialplan if you
     make future changes.
     """
-        % conf
     )
 
     settings = {
@@ -54,15 +52,14 @@ def main():
     We are now ready to begin the installation.
     Confirm your entries below or press Ctrl-C to abort and try again.
 
-    CONFIG: %(config)s
-    GVNUM: %(gvnum)s
-    ACCTNAME: %(acctname)s
-    RINGBACK: %(ringback)s
-    CALLPARK: %(callpark)s
+    CONFIG: {config}
+    GVNUM: {gvnum}
+    ACCTNAME: {acctname}
+    RINGBACK: {ringback}
+    CALLPARK: {callpark}
 
     Hit Enter key to proceed
-    """
-        % settings
+    """.format(**settings)
     )
 
     print(
@@ -100,8 +97,8 @@ def main():
         fo = open(conf, 'a')
         fo.write(content % settings)
         fo.close()
-    except IOError:
-        print('Error opening file for writing: %s' % conf)
+    except OSError:
+        print(f'Error opening file for writing: {conf}')
         exit(0)
 
     print(

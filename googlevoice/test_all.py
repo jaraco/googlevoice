@@ -105,7 +105,7 @@ class TestVoice:
 
     def test_download(self, voice, tmpdir):
         msg = list(voice.voicemail().messages)[0]
-        fn = '%s.mp3' % msg.id
+        fn = f'{msg.id}.mp3'
         with tmpdir.as_cwd():
             voice.download(msg)
             assert os.path.isfile(fn)

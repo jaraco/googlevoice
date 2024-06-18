@@ -11,7 +11,7 @@ def validate_response(response):
     try:
         assert 'ok' in response and response['ok']
     except AssertionError:
-        raise ValidationError('There was a problem with GV: %s' % response)
+        raise ValidationError(f'There was a problem with GV: {response}')
 
 
 def load_and_validate(response):
@@ -92,7 +92,7 @@ class Phone(AttrDict):
 
     def __init__(self, voice, data):
         self.voice = voice
-        super(Phone, self).__init__(data)
+        super().__init__(data)
 
     def enable(
         self,
@@ -120,7 +120,7 @@ class Phone(AttrDict):
         return self.phoneNumber
 
     def __repr__(self):
-        return '<Phone %s>' % self.phoneNumber
+        return f'<Phone {self.phoneNumber}>'
 
 
 class Message(AttrDict):
@@ -190,7 +190,7 @@ class Message(AttrDict):
         return self.id
 
     def __repr__(self):
-        return '<Message #%s (%s)>' % (self.id, self.phoneNumber)
+        return f'<Message #{self.id} ({self.phoneNumber})>'
 
 
 class Folder(AttrDict):
@@ -220,10 +220,10 @@ class Folder(AttrDict):
         return self['totalSize']
 
     def __repr__(self):
-        return '<Folder %s (%s)>' % (self.name, len(self))
+        return f'<Folder {self.name} ({len(self)})>'
 
 
-class XMLParser(object):
+class XMLParser:
     """
     XML Parser helper that can dig json and html out of the feeds.
     The parser takes a ``Voice`` instance, page name, and function

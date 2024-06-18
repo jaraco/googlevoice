@@ -17,14 +17,14 @@ class Config(configparser.ConfigParser):
             try:
                 with open(self.fname, 'w') as f:
                     f.write(settings.DEFAULT_CONFIG)
-            except IOError:
+            except OSError:
                 return
 
         configparser.ConfigParser.__init__(self)
 
         try:
             self.read([self.fname])
-        except IOError:
+        except OSError:
             return
 
     def get(self, option, section='gvoice', **kwargs):

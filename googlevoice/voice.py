@@ -25,7 +25,7 @@ def _gen_user_agent():
     return f'googlevoice/{version} Python/{pyver}'
 
 
-class Voice(object):
+class Voice:
     """
     Main voice instance for interacting with the Google Voice service
     Handles login/logout and most of the baser HTTP methods
@@ -130,8 +130,7 @@ class Voice(object):
                 sleep_seconds = 10
                 try_count += 1
                 print(
-                    'invalid code, retrying after %s seconds (attempt %s)'
-                    % (sleep_seconds, try_count)
+                    f'invalid code, retrying after {sleep_seconds} seconds (attempt {try_count})'
                 )
                 import time
 
@@ -268,7 +267,7 @@ class Voice(object):
             resp.raise_for_status()
         except Exception:
             raise util.DownloadError
-        fn = path.join(adir, '%s.mp3' % msg)
+        fn = path.join(adir, f'{msg}.mp3')
         with open(fn, 'wb') as fo:
             fo.write(resp.content)
         return fn
@@ -336,7 +335,7 @@ class Voice(object):
         """
 
         def getter():
-            page_name = 'XML_%s' % page.upper()
+            page_name = f'XML_{page.upper()}'
             return self.__do_special_page(page_name, data, headers, terms).text
 
         return util.XMLParser(self, page, getter)
