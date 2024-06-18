@@ -39,7 +39,7 @@ class Voice:
         for name in settings.FEEDS:
             setattr(self, name, self.__get_xml_page(name))
 
-        setattr(self, 'message', self.__get_xml_page('message'))
+        self.message = self.__get_xml_page('message')
 
     ######################
     # Some handy methods
@@ -66,7 +66,7 @@ class Voice:
         Credentials will be propmpted for if not given as args or in the
         ``~/.gvoice`` config file
         """
-        if hasattr(self, '_special') and getattr(self, '_special'):
+        if getattr(self, '_special', None):
             return self
 
         email = email or config.email or input('Email address: ')
@@ -81,7 +81,7 @@ class Voice:
             'login_post', {'Email': email, 'Passwd': passwd, 'gxf': gxf}
         )
 
-        if result.url.startswith(getattr(settings, "SMSAUTH")):
+        if result.url.startswith(settings.SMSAUTH):
             content = self.__smsAuth(smsKey)
 
             try:

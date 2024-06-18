@@ -54,7 +54,7 @@ class TestVoice:
     @pytest.fixture(scope='class')
     def voice(self):
         has_creds = conf.config.email and conf.config.password
-        output_captured = getattr(sys.stdout, 'name') != '<stdout>'
+        output_captured = sys.stdout.name != '<stdout>'
         if not has_creds and output_captured:
             pytest.skip("Cannot run with output captured")
 
@@ -64,7 +64,7 @@ class TestVoice:
 
     @pytest.fixture
     def outgoing(self):
-        if getattr(sys.stdout, 'name') != '<stdout>':
+        if sys.stdout.name != '<stdout>':
             pytest.skip("Cannot run with output captured")
         outgoing = input('Outgoing number (blank to ignore call tests): ')
         if not outgoing:
