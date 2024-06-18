@@ -7,11 +7,10 @@ Local variable `voice` is set as the main Voice instance.
 Invoke with python -m googlevoice.interact
 """
 
-import textwrap
 import code
+import textwrap
 
 from . import Voice
-
 
 banner = textwrap.dedent(
     """

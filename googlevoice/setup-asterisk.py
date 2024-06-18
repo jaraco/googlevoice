@@ -3,8 +3,8 @@
 Jacob Feisley, Ward Mundy, and Justin Quick
 """
 
-from sys import exit
 from getpass import getpass
+from sys import exit
 
 
 def main():

@@ -1,18 +1,15 @@
+import itertools
 import os
-import sys
 import random
 import string
+import sys
 import time
-import itertools
 
-import responses
-import pytest
 import faker
+import pytest
+import responses
 
-from googlevoice import Voice
-from googlevoice import settings
-from googlevoice import conf
-
+from googlevoice import Voice, conf, settings
 
 fake = faker.Faker()
 

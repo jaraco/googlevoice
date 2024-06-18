@@ -1,5 +1,5 @@
-import os
 import configparser
+import os
 
 from . import settings
 

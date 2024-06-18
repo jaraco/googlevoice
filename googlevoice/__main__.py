@@ -3,13 +3,13 @@ Googlevoice interactive application. Invoke with python -m googlevoice.
 """
 
 import functools
-from sys import exit
 from atexit import register
 from optparse import OptionParser
 from pprint import pprint
+from sys import exit
 
-from googlevoice.voice import Voice
 from googlevoice.util import LoginError
+from googlevoice.voice import Voice
 
 parser = OptionParser(
     usage='''gvoice [options] commands

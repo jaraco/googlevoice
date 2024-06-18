@@ -1,7 +1,7 @@
 import json
-from xml.parsers.expat import ParserCreate
-from time import gmtime
 from datetime import datetime
+from time import gmtime
+from xml.parsers.expat import ParserCreate
 
 
 def validate_response(response):

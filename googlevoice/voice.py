@@ -1,15 +1,14 @@
-import re
-import logging
-import getpass
 import base64
-import platform
+import getpass
 import importlib.metadata
-
-from .conf import config
-from . import settings
-from . import util
+import logging
+import platform
+import re
 
 import requests
+
+from . import settings, util
+from .conf import config
 
 qpat = re.compile(r'\?')
 
@@ -254,7 +253,7 @@ class Voice:
         example.
         Returns location of saved file.
         """
-        from os import path, getcwd
+        from os import getcwd, path
 
         if isinstance(msg, util.Message):
             msg = msg.id
