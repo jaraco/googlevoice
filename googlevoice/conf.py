@@ -1,5 +1,6 @@
 import configparser
-import os
+import contextlib
+import pathlib
 
 from . import settings
 
@@ -10,22 +11,17 @@ class Config(configparser.ConfigParser):
     ``.gvoice`` and parses configuration data from it.
     """
 
-    def __init__(self, filename: str = os.path.expanduser('~/.gvoice')):
-        self.fname = filename
+    def __init__(self, filename: str = '~/.gvoice'):
+        self.fname = pathlib.Path(filename).expanduser()
 
-        if not os.path.exists(self.fname):
-            try:
-                with open(self.fname, 'w', encoding='utf-8') as f:
-                    f.write(settings.DEFAULT_CONFIG)
-            except OSError:
-                return
+        if not self.fname.exists():
+            with contextlib.suppress(OSError):
+                self.fname.write_text(settings.DEFAULT_CONFIG, encoding='utf-8')
 
         configparser.ConfigParser.__init__(self)
 
-        try:
+        with contextlib.suppress(OSError):
             self.read([self.fname], encoding='utf-8')
-        except OSError:
-            return
 
     def get(self, option, section='gvoice', **kwargs):
         try:
@@ -47,7 +43,7 @@ class Config(configparser.ConfigParser):
             return
 
     def save(self):
-        with open(self.fname, 'w', encoding='utf-8') as f:
+        with self.fname.open('w', encoding='utf-8') as f:
             self.write(f)
 
     forwardingNumber = property(lambda self: self.get('forwardingNumber'))
