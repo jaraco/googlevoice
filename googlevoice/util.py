@@ -8,9 +8,7 @@ def validate_response(response):
     """
     Validates that the JSON response is A-OK
     """
-    try:
-        assert 'ok' in response and response['ok']
-    except AssertionError:
+    if not ('ok' in response and response['ok']):
         raise ValidationError(f'There was a problem with GV: {response}')
 
 
@@ -272,8 +270,8 @@ class XMLParser:
         try:
             data = self.datafunc()
             parser.Parse(data, 1)
-        except Exception:
-            raise ParsingError
+        except Exception as err:
+            raise ParsingError from err
         return self.folder
 
     @property
@@ -290,5 +288,5 @@ class XMLParser:
         """
         try:
             return json.loads(self.json)
-        except Exception:
-            raise JSONError
+        except Exception as err:
+            raise JSONError from err

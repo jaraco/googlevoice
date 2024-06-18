@@ -91,8 +91,8 @@ class Voice:
                 content = self.__do_page(
                     'login', {'smsToken': smsToken, 'service': "grandcentral"}
                 )
-            except AttributeError:
-                raise util.LoginError
+            except AttributeError as err:
+                raise util.LoginError from err
 
             del smsKey, smsToken, gxf
 
@@ -100,8 +100,8 @@ class Voice:
 
         try:
             assert self.special
-        except (AssertionError, AttributeError):
-            raise util.LoginError
+        except (AssertionError, AttributeError) as err:
+            raise util.LoginError from err
 
         return self
 
@@ -264,8 +264,8 @@ class Voice:
         try:
             resp = self.__do_url(url)
             resp.raise_for_status()
-        except Exception:
-            raise util.DownloadError
+        except Exception as err:
+            raise util.DownloadError from err
         fn = path.join(adir, f'{msg}.mp3')
         with open(fn, 'wb') as fo:
             fo.write(resp.content)
