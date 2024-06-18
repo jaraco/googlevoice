@@ -10,7 +10,7 @@ class Config(configparser.ConfigParser):
     ``.gvoice`` and parses configuration data from it.
     """
 
-    def __init__(self, filename=os.path.expanduser('~/.gvoice')):
+    def __init__(self, filename: str = os.path.expanduser('~/.gvoice')):
         self.fname = filename
 
         if not os.path.exists(self.fname):
