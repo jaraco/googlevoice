@@ -311,7 +311,11 @@ class Voice:
         """
         Validates a given special page for an 'ok' response
         """
-        util.load_and_validate(self.__do_special_page(page, dict(data) | kwargs))
+        # Python 3.8 compatibility
+        # data = dict(data) | kwargs
+        data = dict(data)
+        data.update(kwargs)
+        util.load_and_validate(self.__do_special_page(page, data))
 
     _Phone__validate_special_page = __validate_special_page
 
