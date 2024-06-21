@@ -23,7 +23,7 @@ dependencies = [
 dynamic = ["version"]
 
 [project.urls]
-Homepage = "https://github.com/jaraco/googlevoice"
+Source = "https://github.com/jaraco/googlevoice"
 
 [project.optional-dependencies]
 test = [
