@@ -19,6 +19,7 @@ classifiers = [
 requires-python = ">=3.8"
 dependencies = [
 	"requests",
+	"oathtool",
 ]
 dynamic = ["version"]
 

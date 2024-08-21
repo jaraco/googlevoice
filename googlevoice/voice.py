@@ -6,6 +6,7 @@ import platform
 import re
 from collections.abc import Mapping
 
+import oathtool
 import requests
 
 from . import settings, util
@@ -142,9 +143,7 @@ class Voice:
         return content
 
     def __oathtoolAuth(self, smsKey):
-        import commands
-
-        smsPin = commands.getstatusoutput('oathtool --totp ' + smsKey)[1]
+        smsPin = oathtool.generate_otp(smsKey)
         content = self.__do_page('smsauth', {'smsUserPin': smsPin}).read()
         del smsPin
         return content
