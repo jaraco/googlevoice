@@ -34,7 +34,6 @@ test = [
 	"bs4",
 	"responses",
 	"faker",
-	"types-requests",
 ]
 
 doc = [
@@ -66,6 +65,8 @@ type = [
 	"pytest-mypy",
 
 	# local
+	"types-requests",
+	"types-beautifulsoup4",
 ]
 
 
