@@ -21,8 +21,7 @@ banner = textwrap.dedent(
 
 
 def main():
-    voice = Voice()
-    voice.login()
+    voice = Voice()  # loads ~/.googlevoice/session.json
 
     code.interact(banner=banner, local=locals())
 

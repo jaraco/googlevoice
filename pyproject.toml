@@ -24,7 +24,6 @@ requires-python = ">=3.10"
 license = "MIT"
 dependencies = [
 	"requests",
-	"oathtool",
 ]
 dynamic = ["version"]
 
@@ -32,14 +31,18 @@ dynamic = ["version"]
 Source = "https://github.com/jaraco/googlevoice"
 
 [project.optional-dependencies]
+# Browser-driven features (one-time login + sending SMS) need a real browser.
+# Reading the API is pure requests and needs none of this.
+browser = [
+	"nodriver",
+]
+
 test = [
 	# upstream
 	"pytest >= 6, != 8.1.*",
 
 	# local
-	"bs4",
 	"responses",
-	"faker",
 ]
 
 doc = [
@@ -74,7 +77,6 @@ type = [
 
 	# local
 	"types-requests",
-	"types-beautifulsoup4",
 ]
 
 

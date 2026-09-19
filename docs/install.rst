@@ -2,38 +2,20 @@
 
 
 Installation
-=============
+============
 
-Requirements, setup instructions, and how to get it running with a PBX
+::
 
-Requirements
--------------------
+    pip install googlevoice
 
-  * `Python >= 2.3 <http://www.python.org/download/>`_
-  * For Python < 2.6, gvoice requires `simplejson <http://code.google.com/p/simplejson/>`_
+Reading from Google Voice (account, conversations, messages) then needs only
+``requests``.
 
-Setups
--------------------
+The one-time browser sign-in and sending SMS additionally require Google Chrome
+to be installed plus the ``nodriver`` package::
 
-Stable distribution setup::
+    pip install googlevoice[browser]
 
-    $ yum install python python-setuptools
-    $ sudo easy_install simplejson
-    $ sudo easy_install -U pygooglevoice
-
-Bleeding edge source code setup::
-
-    $ yum install python python-setuptools mercurial
-    $ sudo easy_install simplejson
-    $ hg clone https://pygooglevoice.googlecode.com/hg/ pygooglevoice
-    $ cd pygooglevoice
-    $ sudo python setup.py install
-
-Asterisk Setup
--------------------
-
-Here is how to integrate Google Voice with a PBX. This guide was designed for `PBX in a flash <http://pbxinaflash.net/>`_, which is built upon `Asterisk <http://www.asterisk.org/>`_
-
-The first steps are to install `PBX in a flash <http://pbxinaflash.net/>`_. Here is a good guide for doing so http://knol.google.com/k/ward-mundy/pbx-in-a-flash/
-
-Running the setup above copies over a setup script to integrate into your Asterisk configuration setup. Simply run ``$ asterisk-gvoice-setup`` answer a couple questions, then restart your PBX instance.
+Once you have signed in (see :ref:`auth`), the saved session is portable: copy
+``~/.googlevoice/session.json`` to any machine and reads work there with just
+``requests`` -- no browser needed.

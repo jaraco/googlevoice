@@ -1,0 +1,1 @@
+Rewrote authentication and reading against the modern Google Voice web API (``clients6.google.com``), replacing the long-broken legacy HTML scraper. Sign in once with ``python -m googlevoice.auth login`` to create a portable cookie session; reading account info and conversations then needs only ``requests`` and works on any machine.

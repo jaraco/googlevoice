@@ -1,292 +1,270 @@
-import json
-from datetime import datetime
-from time import gmtime
-from xml.parsers.expat import ParserCreate
+"""
+Data wrappers and exceptions for the modern Google Voice API.
+
+The legacy API returned XML wrapping JSON wrapping HTML; the modern API returns
+plain JSON, so the old ``XMLParser`` machinery is gone.  These light wrappers
+give attribute access over the JSON the ``voiceclient`` endpoints return.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from typing import Any
 
 
-def validate_response(response):
-    """
-    Validates that the JSON response is A-OK
-    """
-    if not ('ok' in response and response['ok']):
-        raise ValidationError(f'There was a problem with GV: {response}')
-
-
-def load_and_validate(response):
-    """
-    Loads JSON data from http response then validates
-    """
-    validate_response(response.json())
-
-
-class ValidationError(Exception):
-    """
-    Bombs when response code back from Voice 500s
-    """
-
-
+# --------------------------------------------------------------------------- #
+# Exceptions
+# --------------------------------------------------------------------------- #
 class LoginError(Exception):
-    """
-    Occurs when login credentials are incorrect
-    """
+    """The session is missing, rejected, or expired."""
 
 
-class ParsingError(Exception):
-    """
-    Happens when XML feed parsing fails
-    """
-
-
-class JSONError(Exception):
-    """
-    Failed JSON deserialization
-    """
+class APIError(Exception):
+    """A voiceclient API call returned a non-200 response."""
 
 
 class DownloadError(Exception):
-    """
-    Cannot download message, probably not in voicemail/recorded
-    """
+    """A voicemail/recording could not be downloaded."""
 
 
-class ForwardingError(Exception):
-    """
-    Forwarding number given was incorrect
-    """
+# --------------------------------------------------------------------------- #
+# Helpers
+# --------------------------------------------------------------------------- #
+def _ms_to_datetime(ms: Any) -> datetime | None:
+    try:
+        return datetime.fromtimestamp(int(ms) / 1000, tz=timezone.utc)
+    except (TypeError, ValueError):
+        return None
 
 
-class AttrDict(dict):
-    def __getattr__(self, attr):
-        if attr in self:
-            return self[attr]
+# --------------------------------------------------------------------------- #
+# Messages and threads
+# --------------------------------------------------------------------------- #
+class Message:
+    """A single message (SMS, voicemail, or call) within a thread."""
 
-
-class Phone(AttrDict):
-    """
-    Wrapper for phone objects used for phone specific methods
-    Attributes are:
-
-     * id: int
-     * phoneNumber: i18n phone number
-     * formattedNumber: humanized phone number string
-     * we: data dict
-     * wd: data dict
-     * verified: bool
-     * name: strign label
-     * smsEnabled: bool
-     * scheduleSet: bool
-     * policyBitmask: int
-     * weekdayTimes: list
-     * dEPRECATEDDisabled: bool
-     * weekdayAllDay: bool
-     * telephonyVerified
-     * weekendTimes: list
-     * active: bool
-     * weekendAllDay: bool
-     * enabledForOthers: bool
-     * type: int (1 - Home, 2 - Mobile, 3 - Work, 4 - Gizmo)
-
-    """
-
-    def __init__(self, voice, data):
+    def __init__(self, data: dict, voice=None):
+        self._data = data
         self.voice = voice
-        super().__init__(data)
-
-    def enable(
-        self,
-    ):
-        """
-        Enables this phone for usage
-        """
-        return self.__call_forwarding()
-
-    def disable(self):
-        """
-        Disables this phone
-        """
-        return self.__call_forwarding('0')
-
-    def __call_forwarding(self, enabled='1'):
-        """
-        Enables or disables this phone
-        """
-        self.voice.__validate_special_page(
-            'default_forward', {'enabled': enabled, 'phoneId': self.id}
-        )
-
-    def __str__(self):
-        return self.phoneNumber
-
-    def __repr__(self):
-        return f'<Phone {self.phoneNumber}>'
-
-
-class Message(AttrDict):
-    """
-    Wrapper for all call/sms message instances stored in Google Voice
-    Attributes are:
-
-     * id: SHA1 identifier
-     * isTrash: bool
-     * displayStartDateTime: datetime
-     * star: bool
-     * isSpam: bool
-     * startTime: gmtime
-     * labels: list
-     * displayStartTime: time
-     * children: str
-     * note: str
-     * isRead: bool
-     * displayNumber: str
-     * relativeStartTime: str
-     * phoneNumber: str
-     * type: int
-
-    """
-
-    def __init__(self, folder, id, data):
-        self.folder = folder
-        self.id = id
-        super(AttrDict, self).__init__(data)
-        self['startTime'] = gmtime(int(self['startTime']) / 1000)
-        self['displayStartDateTime'] = datetime.strptime(
-            self['displayStartDateTime'], '%m/%d/%y %I:%M %p'
-        )
-        self['displayStartTime'] = self['displayStartDateTime'].time()
-
-    def delete(self, trash=1):
-        """
-        Moves this message to the Trash. Use ``message.delete(0)``
-        to move it out of the Trash.
-        """
-        self.folder.voice.__messages_post('delete', self.id, trash=trash)
-
-    def star(self, star=1):
-        """
-        Star this message. Use ``message.star(0)`` to unstar it.
-        """
-        self.folder.voice.__messages_post('star', self.id, star=star)
-
-    def mark(self, read=1):
-        """
-        Mark this message as read. Use ``message.mark(0)`` to
-        mark it as unread.
-        """
-        self.folder.voice.__messages_post('mark', self.id, read=read)
-
-    def download(self, adir=None):
-        """
-        Download the message MP3 (if any).
-        Saves files to ``adir`` (defaults to current directory).
-        Message hashes can be found in ``self.voicemail().messages``
-        for example.
-        Returns location of saved file.
-        """
-        return self.folder.voice.download(self, adir)
-
-    def __str__(self):
-        return self.id
-
-    def __repr__(self):
-        return f'<Message #{self.id} ({self.phoneNumber})>'
-
-
-class Folder(AttrDict):
-    """
-    Folder wrapper for feeds from Google Voice
-    Attributes are:
-
-     * totalSize: int (aka ``__len__``)
-     * unreadCounts: dict
-     * resultsPerPage: int
-     * messages: list of Message instances
-    """
-
-    def __init__(self, voice, name, data):
-        self.voice = voice
-        self.name = name
-        super(AttrDict, self).__init__(data)
 
     @property
-    def messages(self):
-        """
-        Returns a list of all messages in this folder
-        """
-        return [Message(self, *i) for i in self['messages'].items()]
-
-    def __len__(self):
-        return self['totalSize']
-
-    def __repr__(self):
-        return f'<Folder {self.name} ({len(self)})>'
-
-
-class XMLParser:
-    """
-    XML Parser helper that can dig json and html out of the feeds.
-    The parser takes a ``Voice`` instance, page name, and function
-    to grab data from.
-    Calling the parser calls the data function once, sets up the
-    ``json`` and ``html``
-    attributes and returns a ``Folder`` instance for the given page::
-
-        o = XMLParser(voice, 'voicemail', lambda: 'some xml payload')
-        o()
-        <Folder ...>
-        o.json
-        'some json payload'
-        o.data
-        'loaded json payload'
-        o.html
-        'some html payload'
-
-    """
-
-    attr = None
-
-    def start_element(self, name, attrs):
-        if name in ('json', 'html'):
-            self.attr = name
-
-    def end_element(self, name):
-        self.attr = None
-
-    def char_data(self, data):
-        if self.attr and data:
-            setattr(self, self.attr, getattr(self, self.attr) + data)
-
-    def __init__(self, voice, name, datafunc):
-        self.json, self.html = '', ''
-        self.datafunc = datafunc
-        self.voice = voice
-        self.name = name
-
-    def __call__(self):
-        self.json, self.html = '', ''
-        parser = ParserCreate()
-        parser.StartElementHandler = self.start_element
-        parser.EndElementHandler = self.end_element
-        parser.CharacterDataHandler = self.char_data
-        try:
-            data = self.datafunc()
-            parser.Parse(data, 1)
-        except Exception as err:
-            raise ParsingError from err
-        return self.folder
+    def id(self) -> str | None:
+        return self._data.get('id')
 
     @property
-    def folder(self):
+    def text(self) -> str | None:
+        """The SMS body, or the voicemail transcript.
+
+        Google only fills ``messageText`` for SMS. For a voicemail it is always
+        the empty string and the transcript arrives as ``transcript``, a list of
+        scored word tokens, so this joins those words back into a sentence.
+        Voicemails whose ``transcript_status`` is not ``'received'`` have no
+        transcript at all and keep the API's empty ``messageText``.
         """
-        Returns associated ``Folder`` instance for given page (``self.name``)
-        """
-        return Folder(self.voice, self.name, self.data)
+        body = self._data.get('messageText')
+        return body or self.transcript or body
 
     @property
-    def data(self):
-        """
-        Returns the parsed json information after calling the XMLParser
+    def transcript(self) -> str | None:
+        """The voicemail transcript as a sentence, or None if there isn't one."""
+        tokens = (self._data.get('transcript') or {}).get('wordTokens') or []
+        words = [w.get('word') for w in tokens if w.get('word')]
+        return ' '.join(words) if words else None
+
+    @property
+    def transcript_status(self) -> str | None:
+        """``'received'`` when a transcript exists, e.g. ``'processingFailure'``
+        when Google could not transcribe the voicemail."""
+        return self._data.get('transcriptStatus')
+
+    @property
+    def transcript_confidence(self) -> float | None:
+        """Google's confidence in the whole transcript, 0..1."""
+        return (self._data.get('transcript') or {}).get('confidence')
+
+    @property
+    def type(self) -> str | None:
+        """``smsIn``, ``smsOut``, ``sip`` (a call), ``missed``, ``voicemail``."""
+        return self._data.get('type')
+
+    @property
+    def coarse_type(self) -> str | None:
+        """For calls, the direction: ``callTypeOutgoing`` / ``callTypeIncoming``
+        / ``callTypeMissed``."""
+        return self._data.get('coarseType')
+
+    @property
+    def duration(self) -> int | None:
+        """How long the call or voicemail ran, **in whole seconds**.
+
+        Google reports this as an integer number of seconds (not milliseconds),
+        and only for calls, voicemails and recordings. SMS have no duration and
+        return None.
         """
         try:
-            return json.loads(self.json)
-        except Exception as err:
-            raise JSONError from err
+            return int(self._data['duration'])
+        except (KeyError, TypeError, ValueError):
+            return None
+
+    @property
+    def is_voicemail(self) -> bool:
+        return 'voicemail' in (self.type or '').lower()
+
+    @property
+    def recording_url(self) -> str | None:
+        """URL of the voicemail/recording audio, if any."""
+        return self._data.get('recordingUrl')
+
+    @property
+    def has_audio(self) -> bool:
+        """Whether this message carries downloadable voicemail/recording audio."""
+        return bool(self.recording_url)
+
+    def download(self, dest: str | None = None) -> str:
+        """Download the voicemail/recording audio; see :meth:`Voice.download`."""
+        if self.voice is None:
+            raise DownloadError('Message has no Voice attached to download with.')
+        return self.voice.download(self, dest)
+
+    @property
+    def incoming(self) -> bool:
+        """
+        True for things you received (incoming SMS, received or missed calls,
+        voicemail); False for things you sent/placed.
+
+        ``type`` is authoritative for SMS (``smsIn``/``smsOut``). For calls and
+        voicemail, direction is in ``coarseType`` (``callTypeOutgoing`` = placed
+        by you). Note SMS *also* carry a ``coarseType`` (``callTypeSmsIn`` /
+        ``callTypeSmsOut``), so it must not be consulted first.
+        """
+        t = (self.type or '').lower()
+        if t.startswith('sms'):
+            return t.endswith('in')
+        return (self.coarse_type or '').lower() != 'calltypeoutgoing'
+
+    @property
+    def phone_number(self) -> str | None:
+        """The other party's number."""
+        return (self._data.get('contact') or {}).get('phoneNumber')
+
+    @property
+    def did(self) -> str | None:
+        """Your Google Voice number this message went through."""
+        return self._data.get('did')
+
+    @property
+    def start_time(self) -> datetime | None:
+        return _ms_to_datetime(self._data.get('startTime'))
+
+    def as_dict(self) -> dict:
+        """A plain, JSON-serializable view of this message."""
+        when = self.start_time
+        return {
+            'id': self.id,
+            'text': self.text,
+            'type': self.type,
+            'duration': self.duration,
+            'incoming': self.incoming,
+            'phone_number': self.phone_number,
+            'did': self.did,
+            'start_time': when.isoformat() if when else None,
+        }
+
+    def __repr__(self) -> str:
+        arrow = '<-' if self.incoming else '->'
+        return f'<Message {arrow} {self.phone_number}: {self.text!r}>'
+
+
+class Thread:
+    """A conversation: a list of :class:`Message` plus reply helpers."""
+
+    def __init__(self, voice, data: dict):
+        self.voice = voice
+        self._data = data
+
+    @property
+    def id(self) -> str | None:
+        """e.g. ``t.+12085551234`` (number), ``t.22000`` (short code)."""
+        return self._data.get('id')
+
+    @property
+    def read(self) -> bool:
+        return bool(self._data.get('read'))
+
+    @property
+    def is_text(self) -> bool:
+        return bool(self._data.get('isText'))
+
+    @property
+    def messages(self) -> list[Message]:
+        """Messages, newest first (as Google returns them)."""
+        return [Message(m, self.voice) for m in self._data.get('item', [])]
+
+    @property
+    def voicemails(self) -> list[Message]:
+        """Just the voicemail messages in this conversation."""
+        return [m for m in self.messages if m.is_voicemail]
+
+    @property
+    def latest(self) -> Message | None:
+        items = self._data.get('item') or []
+        return Message(items[0], self.voice) if items else None
+
+    @property
+    def latest_text(self) -> str | None:
+        return self.latest.text if self.latest else None
+
+    @property
+    def contact(self) -> str | None:
+        """The recipient's phone number / identifier for this thread."""
+        keys = self._data.get('headingContactsPhoneNumberKey') or []
+        if keys:
+            return keys[0]
+        latest = self.latest
+        return latest.phone_number if latest else None
+
+    def reply(self, text: str) -> dict:
+        """Send ``text`` back into this conversation."""
+        return self.voice.send_sms(self.contact, text, thread_id=self.id)
+
+    # Conversation actions -- thin shortcuts onto the matching Voice method.
+    def archive(self) -> dict:
+        """Move this conversation to the Archive."""
+        return self.voice.archive(self)
+
+    def unarchive(self) -> dict:
+        """Restore this conversation from the Archive."""
+        return self.voice.unarchive(self)
+
+    def mark_spam(self) -> dict:
+        """Flag this conversation as spam."""
+        return self.voice.mark_spam(self)
+
+    def mark_not_spam(self) -> dict:
+        """Clear the spam flag from this conversation."""
+        return self.voice.mark_not_spam(self)
+
+    def block(self) -> dict:
+        """Block the other party on this conversation."""
+        return self.voice.block(self)
+
+    def unblock(self) -> dict:
+        """Unblock the other party on this conversation."""
+        return self.voice.unblock(self)
+
+    def mark_read(self, read: bool = True) -> dict:
+        """Mark this conversation read (``read=False`` marks it unread)."""
+        return self.voice.mark_read(self, read)
+
+    def as_dict(self) -> dict:
+        """A plain, JSON-serializable view of this conversation."""
+        return {
+            'id': self.id,
+            'contact': self.contact,
+            'read': self.read,
+            'is_text': self.is_text,
+            'messages': [m.as_dict() for m in self.messages],
+        }
+
+    def __repr__(self) -> str:
+        return f'<Thread {self.id} ({self.contact}): {self.latest_text!r}>'

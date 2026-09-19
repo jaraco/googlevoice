@@ -1,361 +1,458 @@
-import base64
-import getpass
-import importlib.metadata
+"""
+Client for the modern Google Voice web API.
+
+The legacy ``/voice/b/0/`` HTML/XML endpoints this library was built on are
+gone (see issues #7 and #8).  This is a ground-up reimplementation against the
+JSON API the current voice.google.com web app uses:
+
+    https://clients6.google.com/voice/v1/voiceclient/...
+
+Authentication is handled by :mod:`googlevoice.auth` (a portable cookie
+session, no browser needed at call time).  Typical use::
+
+    from googlevoice import Voice
+    v = Voice()                       # loads ~/.googlevoice/session.json
+    print(v.number)                   # your Google Voice number
+    for thread in v.threads():        # recent SMS/voicemail threads
+        print(thread.contact, thread.latest_text)
+    v.archive(thread)                 # archive / spam / block etc. all work
+    v.send_sms('+15555551234', 'Hi')  # sending needs a browser (see below)
+
+Run ``python -m googlevoice.auth login`` once first to create the session.
+
+Reads and *state changes* (archive, spam, block, mark-read) are plain HTTP
+calls.  Only *sending* is gated behind anti-abuse tokens that require a browser
+(see :mod:`googlevoice.browser`).
+
+The endpoint shapes here were reverse-engineered from the live web app's
+network traffic (``python -m googlevoice capture``) and verified against a real
+account.
+"""
+
+from __future__ import annotations
+
+import json
 import logging
-import platform
 import re
-from collections.abc import Mapping
+import time
+from typing import Any
 
-import oathtool
-import requests
-
-from . import settings, util
-from .conf import config
-
-qpat = re.compile(r'\?')
-
-if settings.DEBUG:
-    logging.basicConfig(level=logging.DEBUG)
+from . import auth, util
+from .auth import (
+    API_BASE,
+    API_KEY,
+    DEFAULT_PROFILE_DIR,
+    DEFAULT_SESSION_PATH,
+    Credentials,
+)
 
 log = logging.getLogger(__name__)
 
+# Country code assumed for bare national numbers (e.g. ``2085551234``). Change
+# this for non-US accounts.
+DEFAULT_COUNTRY_CODE = '+1'
 
-def _gen_user_agent():
-    version = importlib.metadata.version('googlevoice')
-    pyver = platform.python_version()
-    return f'googlevoice/{version} Python/{pyver}'
+# Thread-id prefixes that are already ids (not dialable numbers): ``t.`` single
+# number, ``g.`` group, ``c.`` call/voicemail conversation.
+_ID_PREFIXES = ('t.', 'g.', 'c.')
+
+
+def normalize_number(number: str) -> str:
+    """
+    Normalize a phone number for use as a thread id / recipient.
+
+    Strips common formatting (spaces, parens, dashes, dots) and, for bare
+    national numbers, prepends :data:`DEFAULT_COUNTRY_CODE`. Already-E.164
+    numbers, thread ids (``t.``/``g.``/``c.``), and short codes are passed
+    through.
+
+    >>> normalize_number('+1 (208) 555-0123')
+    '+12085550123'
+    >>> normalize_number('2085550123')
+    '+12085550123'
+    >>> normalize_number('22000')
+    '22000'
+    """
+    n = number.strip()
+    if n.startswith(_ID_PREFIXES):
+        return n
+    n = re.sub(r'[\s()\-.]', '', n)
+    if n.startswith('+'):
+        return n
+    digits = n.lstrip('+')
+    if len(digits) <= 6:  # short code (e.g. 22000) -- not a dialable number
+        return n
+    if len(digits) == 11 and digits.startswith('1'):
+        return '+' + digits
+    if len(digits) == 10:
+        return DEFAULT_COUNTRY_CODE + digits
+    return n
+
+
+class Folder:
+    """
+    Selector for the ``folder`` slot (``body[0]``) of ``api2thread/list``.
+
+    These integers were confirmed against a live account: the Archive and Spam
+    views each hold all three conversation kinds (SMS, calls, voicemail).
+    There is **no Trash folder** -- in the modern web app deletion is permanent.
+    """
+
+    CALLS = 1  # call history (placed / received / missed)
+    INBOX = 2  # text-message conversations (the default Messages view)
+    VOICEMAIL = 4  # voicemail conversations
+    SPAM = 5  # spam (all kinds)
+    ARCHIVE = 6  # archived conversations (all kinds)
+
+
+class MessageType:
+    """Values of a message's ``type`` field (verified against a live account)."""
+
+    SMS_IN = 'smsIn'
+    SMS_OUT = 'smsOut'
+    SIP = 'sip'  # a placed or received call (direction is in ``coarseType``)
+    MISSED = 'missed'  # a missed call
+    VOICEMAIL = 'voicemail'  # a voicemail (``recordingUrl`` + transcript)
+
+
+class CoarseType:
+    """Values of a call's ``coarseType`` field (call direction)."""
+
+    PLACED = 'callTypeOutgoing'  # verified
+    RECEIVED = 'callTypeIncoming'
+    MISSED = 'callTypeMissed'
+
+
+# --------------------------------------------------------------------------- #
+# State changes: thread/batchupdateattributes
+# --------------------------------------------------------------------------- #
+# A single endpoint changes a thread's state.  Its body is
+#
+#     [[[ values, mask, 1 ]]]
+#
+# where ``values[0]`` is the thread id and a flag (0/1) sits at one further
+# index; ``mask`` is a parallel array with a ``1`` marking that index.  The
+# index selects which attribute changes (verified by toggling each on a live
+# thread and watching which folder it moved to):
+class _Attr:
+    BLOCK = 1  # block / unblock the other party
+    SPAM = 2  # mark / unmark spam  (moves to/from the Spam folder)
+    READ = 3  # mark read / unread
+    ARCHIVE = 5  # archive / unarchive (moves to/from the Archive folder)
+
+
+def _update_attr_body(thread_id: str, index: int, value: int) -> list:
+    """Build the ``thread/batchupdateattributes`` body to set one attribute."""
+    values = [thread_id] + [None] * (index - 1) + [value]
+    mask = [None] * index + [1]
+    return [[[values, mask, 1]]]
+
+
+# Voicemail/recording audio travels in the message JSON under this key
+# (verified: an authenticated GET of it returns the MP3).
+_MEDIA_URL_KEYS = ('recordingUrl',)
 
 
 class Voice:
     """
-    Main voice instance for interacting with the Google Voice service
-    Handles login/logout and most of the baser HTTP methods
+    Main entry point for the modern Google Voice API.
+
+    Pass :class:`~googlevoice.auth.Credentials`, or leave it ``None`` to load
+    the default saved session (``~/.googlevoice/session.json``).
+
+    If ``auto_login`` is true (default), a call that Google rejects with HTTP
+    401 (an expired session) triggers a one-time browser re-login -- which
+    auto-confirms in seconds when the saved Chrome profile is still signed in --
+    and the call is retried.  Set ``auto_login=False`` for headless servers
+    with no browser.
     """
 
-    user_agent = _gen_user_agent()
-
-    def __init__(self):
-        self.session = requests.Session()
-        self.session.headers.update({'User-Agent': self.user_agent})
-
-        for name in settings.FEEDS:
-            setattr(self, name, self.__get_xml_page(name))
-
-        self.message = self.__get_xml_page('message')
-
-    ######################
-    # Some handy methods
-    ######################
-    @property
-    def special(self):
-        """
-        Returns special identifier for your session (if logged in)
-        """
-        if getattr(self, '_special', None):
-            return self._special
-        pattern = re.compile(r"('_rnr_se':) '(.+)'")
-        resp = self.session.get(settings.INBOX).text
-        try:
-            sp = pattern.search(resp).group(2)
-        except AttributeError:
-            sp = None
-        self._special = sp
-        return sp
-
-    def login(self, email=None, passwd=None, smsKey=None):
-        """
-        Login to the service using your Google Voice account
-        Credentials will be propmpted for if not given as args or in the
-        ``~/.gvoice`` config file
-        """
-        if getattr(self, '_special', None):
-            return self
-
-        email = email or config.email or input('Email address: ')
-        passwd = passwd or config.password or getpass.getpass()
-
-        content = self.__do_page('login').text
-        # holy hackjob
-        gxf = re.search(
-            r"type=\"hidden\"\s+name=\"gxf\"\s+value=\"(.+)\"", content
-        ).group(1)
-        result = self.__do_page(
-            'login_post', {'Email': email, 'Passwd': passwd, 'gxf': gxf}
-        )
-
-        if result.url.startswith(settings.SMSAUTH):
-            content = self.__smsAuth(smsKey)
-
-            try:
-                smsToken = re.search(
-                    r"name=\"smsToken\"\s+value=\"([^\"]+)\"", content
-                ).group(1)
-                content = self.__do_page(
-                    'login', {'smsToken': smsToken, 'service': "grandcentral"}
-                )
-            except AttributeError as err:
-                raise util.LoginError from err
-
-            del smsKey, smsToken, gxf
-
-        del email, passwd
-
-        try:
-            assert self.special
-        except (AssertionError, AttributeError) as err:
-            raise util.LoginError from err
-
-        return self
-
-    def __smsAuth(self, smsKey=None):
-        if smsKey is None:
-            smsKey = config.smsKey
-
-        if smsKey is None:
-            from getpass import getpass
-
-            smsPin = getpass("SMS PIN: ")
-            content = self.__do_page('smsauth', {'smsUserPin': smsPin}).read()
-
-        else:
-            smsKey = base64.b32decode(re.sub(r' ', '', smsKey), casefold=True).encode(
-                "hex"
-            )
-            content = self.__oathtoolAuth(smsKey)
-
-            try_count = 1
-
-            while (
-                "The code you entered didn&#39;t verify." in content and try_count < 5
-            ):
-                sleep_seconds = 10
-                try_count += 1
-                print(
-                    f'invalid code, retrying after {sleep_seconds} seconds (attempt {try_count})'
-                )
-                import time
-
-                time.sleep(sleep_seconds)
-                content = self.__oathtoolAuth(smsKey)
-
-        del smsKey
-
-        return content
-
-    def __oathtoolAuth(self, smsKey):
-        smsPin = oathtool.generate_otp(smsKey)
-        content = self.__do_page('smsauth', {'smsUserPin': smsPin}).read()
-        del smsPin
-        return content
-
-    def logout(self):
-        """
-        Logs out an instance and makes sure it does not still have a session
-        """
-        self.__do_page('logout')
-        del self._special
-        assert self.special is None
-        return self
-
-    def call(
+    def __init__(
         self,
-        outgoingNumber,
-        forwardingNumber=None,
-        phoneType=None,
-        subscriberNumber=None,
+        credentials: Credentials | None = None,
+        *,
+        session_path=DEFAULT_SESSION_PATH,
+        profile_dir=DEFAULT_PROFILE_DIR,
+        auto_login: bool = True,
     ):
-        """
-        Make a call to an ``outgoingNumber`` from your
-        ``forwardingNumber`` (optional).
-        If you pass in your ``forwardingNumber``, please also pass
-        in the correct ``phoneType``
-        """
-        if forwardingNumber is None:
-            forwardingNumber = config.forwardingNumber
-        if phoneType is None:
-            phoneType = config.phoneType
+        self._session_path = session_path
+        self._profile_dir = profile_dir
+        self._auto_login = auto_login
+        self.credentials = credentials or Credentials.load(session_path)
+        self._http = self.credentials.requests_session()
 
-        self.__validate_special_page(
-            'call',
-            {
-                'outgoingNumber': outgoingNumber,
-                'forwardingNumber': forwardingNumber,
-                'subscriberNumber': subscriberNumber or 'undefined',
-                'phoneType': phoneType,
-                'remember': '1',
-            },
+    # ----------------------------------------------------------------- #
+    # Low-level call
+    # ----------------------------------------------------------------- #
+    def _call(
+        self, endpoint: str, body: Any, *, alt: str = 'json', _retried=False
+    ) -> Any:
+        """POST ``body`` (a JSON-able protojson array) to ``endpoint``."""
+        resp = self._http.post(
+            API_BASE + endpoint,
+            params={'alt': alt, 'key': API_KEY},
+            headers=self.credentials.auth_headers(),
+            data=json.dumps(body),
+            timeout=30,
         )
+        if resp.status_code == 401:
+            if self._auto_login and not _retried and self._refresh_session():
+                return self._call(endpoint, body, alt=alt, _retried=True)
+            raise util.LoginError(
+                'Google rejected the session (401). It may be expired -- '
+                're-run `python -m googlevoice.auth login`.'
+            )
+        if resp.status_code != 200:
+            raise util.APIError(
+                f'{endpoint} -> HTTP {resp.status_code}: {resp.text[:300]}'
+            )
+        if alt == 'json':
+            try:
+                return resp.json()
+            except ValueError as err:
+                raise util.APIError(f'{endpoint}: bad JSON response') from err
+        return resp.text
 
-    __call__ = call
-
-    def cancel(self, outgoingNumber=None, forwardingNumber=None):
-        """
-        Cancels a call matching outgoing and forwarding numbers (if given).
-        Will raise an error if no matching call is being placed
-        """
-        self.__validate_special_page(
-            'cancel',
-            {
-                'outgoingNumber': outgoingNumber or 'undefined',
-                'forwardingNumber': forwardingNumber or 'undefined',
-                'cancelType': 'C2C',
-            },
-        )
-
-    @property
-    def phones(self):
-        """
-        Returns a list of ``Phone`` instances attached to your account.
-        """
-        return [util.Phone(self, data) for data in self.contacts['phones'].values()]
-
-    @property
-    def settings(self):
-        """
-        Dict of current Google Voice settings
-        """
-        return util.AttrDict(self.contacts['settings'])
-
-    def send_sms(self, phoneNumber, text):
-        """
-        Send an SMS message to a given ``phoneNumber`` with
-        the given ``text`` message
-        """
-        self.__validate_special_page('sms', {'phoneNumber': phoneNumber, 'text': text})
-
-    def search(self, query):
-        """
-        Search your Google Voice Account history for calls, voicemails, and sms
-        Returns ``Folder`` instance containting matching messages
-        """
-        data = dict(q=query)
-        return self.__get_xml_page('search', terms=data)()
-
-    def archive(self, msg, archive=1):
-        """
-        Archive the specified message by removing it from the Inbox.
-        """
-        self.__messages_post('archive', msg, archive=archive)
-
-    def delete(self, msg, trash=1):
-        """
-        Moves this message to the Trash. Use ``message.delete(0)``
-        to move it out of the Trash.
-        """
-        self.__messages_post('delete', msg, trash=trash)
-
-    def download(self, msg, adir=None):
-        """
-        Download a voicemail or recorded call MP3 matching the given ``msg``
-        which can either be a ``Message`` instance, or a SHA1 identifier.
-        Saves files to ``adir`` (defaults to current directory).
-        Message hashes can be found in ``self.voicemail().messages`` for
-        example.
-        Returns location of saved file.
-        """
-        from os import getcwd, path
-
-        if isinstance(msg, util.Message):
-            msg = msg.id
-        if adir is None:
-            adir = getcwd()
-        url = self.__resolve_page('download')
-        url += msg
+    def _refresh_session(self) -> bool:
+        """Re-mint the session via a browser login; return True on success."""
+        log.info('session expired -- refreshing via browser login')
         try:
-            resp = self.__do_url(url)
-            resp.raise_for_status()
-        except Exception as err:
-            raise util.DownloadError from err
-        fn = path.join(adir, f'{msg}.mp3')
-        with open(fn, 'wb') as fo:
-            fo.write(resp.content)
-        return fn
+            self.credentials = auth.browser_login(
+                self._session_path, self._profile_dir, timeout=120
+            )
+        except Exception as err:  # noqa: BLE001 - nodriver missing, signed out, etc.
+            log.warning('auto re-login failed: %s', err)
+            return False
+        self._http = self.credentials.requests_session()
+        return True
+
+    # ----------------------------------------------------------------- #
+    # Account
+    # ----------------------------------------------------------------- #
+    def account(self) -> dict:
+        """Raw account info (primary number, phones, settings)."""
+        return self._call('account/get', [None, 1])['account']
 
     @property
-    def contacts(self):
-        """
-        Partial data of your Google Account Contacts related to
-        your Voice account.
-        For a more comprehensive suite of APIs, check out
-        http://code.google.com/apis/contacts/docs/1.0/developers_guide_python.html
-        """
-        if hasattr(self, '_contacts'):
-            return self._contacts
-        self._contacts = self.__get_xml_page('contacts')()
-        return self._contacts
+    def number(self) -> str | None:
+        """Your Google Voice number in E.164 form, e.g. ``+12085551234``."""
+        return self.account().get('primaryDid')
 
-    ######################
-    # Helper methods
-    ######################
-
-    def __resolve_page(self, page):
-        return getattr(settings, page.upper())
-
-    def __do_page(self, page, data=None, headers=None, terms=None):
+    # ----------------------------------------------------------------- #
+    # Reading conversations
+    # ----------------------------------------------------------------- #
+    def threads(
+        self,
+        folder: int = Folder.INBOX,
+        count: int = 20,
+        *,
+        messages: int = 15,
+        cursor: str | None = None,
+    ) -> list[util.Thread]:
         """
-        Loads a page out of the settings and request it using requests.
-        Return Response.
-        """
-        return self.__do_url(self.__resolve_page(page), data, headers, terms)
+        Return recent conversation :class:`~googlevoice.util.Thread` objects.
 
-    def __do_url(self, url, data=None, headers=None, terms=None):
-        log.debug('url is %s', url)
-        log.debug('data is %s', data)
-        method = 'POST' if data else 'GET'
-        return self.session.request(
-            method, url, data=data, params=terms or None, headers=headers
+        ``count`` is how many conversations to return; ``messages`` is how many
+        recent messages to include per conversation. ``cursor`` is the
+        ``startTime`` of the oldest thread from a previous page (for paging).
+        """
+        body = [folder, count, messages, cursor, None, [None, 1, 1, 1]]
+        data = self._call('api2thread/list', body)
+        return [util.Thread(self, t) for t in data.get('thread', [])]
+
+    def inbox(self, count: int = 20) -> list[util.Thread]:
+        """Text-message conversations (the default Messages view)."""
+        return self.threads(Folder.INBOX, count)
+
+    def calls(self, count: int = 20) -> list[util.Thread]:
+        """Call-history conversations (placed / received / missed)."""
+        return self.threads(Folder.CALLS, count)
+
+    def archived(self, count: int = 20) -> list[util.Thread]:
+        """Archived conversations (all kinds). Restore with :meth:`unarchive`."""
+        return self.threads(Folder.ARCHIVE, count)
+
+    def spam(self, count: int = 20) -> list[util.Thread]:
+        """Spam conversations (all kinds). Clear with :meth:`mark_not_spam`."""
+        return self.threads(Folder.SPAM, count)
+
+    def thread(self, recipient: str, *, messages: int = 100) -> util.Thread | None:
+        """
+        Return the single conversation with ``recipient`` (a number this library
+        can normalize, or a thread id), with up to ``messages`` recent messages,
+        or ``None`` if there is no such conversation.
+        """
+        tid = _thread_id_for(recipient)
+        data = self._call('api2thread/get', [tid, messages, None, [None, 1, 1]])
+        t = data.get('thread')
+        return util.Thread(self, t) if t else None
+
+    def search(self, query: str, *, count: int = 200) -> list[util.Thread]:
+        """Full-text search across conversations (the web app's top search box)."""
+        body = [query, count, None, None, None, [None, 1, 1, 1]]
+        data = self._call('api2thread/search', body)
+        return [util.Thread(self, t) for t in data.get('thread', [])]
+
+    # ----------------------------------------------------------------- #
+    # Message-type filters (voicemail and the call kinds)
+    # ----------------------------------------------------------------- #
+    def _messages(self, folder: int, count: int) -> list[util.Message]:
+        return [m for t in self.threads(folder, count) for m in t.messages]
+
+    def voicemails(self, count: int = 20) -> list[util.Message]:
+        """Voicemail messages -- :attr:`Message.text` is the transcript and
+        :meth:`Message.download` fetches the audio."""
+        return [m for m in self._messages(Folder.VOICEMAIL, count) if m.is_voicemail]
+
+    def missed(self, count: int = 20) -> list[util.Message]:
+        """Missed-call records."""
+        return [
+            m
+            for m in self._messages(Folder.CALLS, count)
+            if m.type == MessageType.MISSED or m.coarse_type == CoarseType.MISSED
+        ]
+
+    def placed(self, count: int = 20) -> list[util.Message]:
+        """Outgoing (placed) call records."""
+        return [
+            m
+            for m in self._messages(Folder.CALLS, count)
+            if m.coarse_type == CoarseType.PLACED
+        ]
+
+    def received(self, count: int = 20) -> list[util.Message]:
+        """Answered incoming-call records."""
+        return [
+            m
+            for m in self._messages(Folder.CALLS, count)
+            if m.coarse_type == CoarseType.RECEIVED
+        ]
+
+    def recorded(self, count: int = 20) -> list[util.Message]:
+        """Recorded calls / voicemails that have downloadable audio."""
+        msgs = self._messages(Folder.CALLS, count) + self._messages(
+            Folder.VOICEMAIL, count
+        )
+        return [m for m in msgs if m.has_audio]
+
+    # ----------------------------------------------------------------- #
+    # State changes (archive / spam / block / read) -- no browser needed
+    # ----------------------------------------------------------------- #
+    def _set_attr(self, target: util.Thread | str, index: int, value: int) -> dict:
+        tid = target.id if isinstance(target, util.Thread) else _thread_id_for(target)
+        return self._call(
+            'thread/batchupdateattributes', _update_attr_body(tid, index, value)
         )
 
-    def __validate_special_page(self, page, data: Mapping = {}, **kwargs):
-        """
-        Validates a given special page for an 'ok' response
-        """
-        # Python 3.8 compatibility
-        # data = dict(data) | kwargs
-        data = dict(data)
-        data.update(kwargs)
-        util.load_and_validate(self.__do_special_page(page, data))
+    def archive(self, target: util.Thread | str) -> dict:
+        """Move a conversation to the Archive."""
+        return self._set_attr(target, _Attr.ARCHIVE, 1)
 
-    _Phone__validate_special_page = __validate_special_page
+    def unarchive(self, target: util.Thread | str) -> dict:
+        """Restore an archived conversation."""
+        return self._set_attr(target, _Attr.ARCHIVE, 0)
 
-    def __do_special_page(
-        self, page, data=None, headers: Mapping = {}, terms: Mapping = {}
-    ):
+    def mark_spam(self, target: util.Thread | str) -> dict:
+        """Flag a conversation as spam."""
+        return self._set_attr(target, _Attr.SPAM, 1)
+
+    def mark_not_spam(self, target: util.Thread | str) -> dict:
+        """Clear the spam flag from a conversation."""
+        return self._set_attr(target, _Attr.SPAM, 0)
+
+    def block(self, target: util.Thread | str) -> dict:
+        """Block the other party on a conversation."""
+        return self._set_attr(target, _Attr.BLOCK, 1)
+
+    def unblock(self, target: util.Thread | str) -> dict:
+        """Unblock the other party on a conversation."""
+        return self._set_attr(target, _Attr.BLOCK, 0)
+
+    def mark_read(self, target: util.Thread | str, read: bool = True) -> dict:
+        """Mark a conversation read (``read=False`` marks it unread)."""
+        return self._set_attr(target, _Attr.READ, 1 if read else 0)
+
+    def mark_all_read(self, folder: int = Folder.INBOX) -> dict:
+        """Mark every conversation in ``folder`` as read."""
+        return self._call('thread/markallread', [folder])
+
+    def delete(self, target: util.Thread | str) -> dict:
         """
-        Add self.special to request data
+        Permanently delete a conversation.
+
+        .. warning::
+           **Not yet implemented.**  Deletion in the modern web app is
+           *permanent* (there is no Trash), and its request shape was not among
+           the captured calls, so it is intentionally not guessed here.  To add
+           it safely, run ``python -m googlevoice capture``, delete a throwaway
+           conversation, and wire the captured endpoint/body in.
         """
-        assert self.special, 'You must login before using this page'
-        if isinstance(data, tuple):
-            data += ('_rnr_se', self.special)
-        elif isinstance(data, dict):
-            data.update({'_rnr_se': self.special})
-        return self.__do_page(page, data, headers, terms)
+        raise NotImplementedError(
+            'delete is permanent and its API shape is unverified; capture it '
+            'first (see the docstring).'
+        )
 
-    _Phone__do_special_page = __do_special_page
-
-    def __get_xml_page(
-        self, page, data=None, headers: Mapping = {}, terms: Mapping = {}
-    ):
+    # ----------------------------------------------------------------- #
+    # Voicemail / recording download
+    # ----------------------------------------------------------------- #
+    def download(self, message: util.Message | dict, dest: str | None = None) -> str:
         """
-        Return XMLParser instance generated from given page
+        Download the voicemail/recording audio for ``message`` to ``dest`` (a
+        directory, default: cwd) as ``<message id>.mp3`` and return the path.
         """
+        import os
 
-        def getter():
-            page_name = f'XML_{page.upper()}'
-            return self.__do_special_page(page_name, data, headers, terms).text
+        data = message._data if isinstance(message, util.Message) else message
+        url = next((data[k] for k in _MEDIA_URL_KEYS if data.get(k)), None)
+        if not url:
+            raise util.DownloadError('This message has no recording to download.')
+        resp = self._http.get(url, headers=self.credentials.auth_headers(), timeout=60)
+        if resp.status_code not in (200, 206):
+            raise util.DownloadError(f'download -> HTTP {resp.status_code}')
+        path = os.path.join(dest or os.getcwd(), f'{data.get("id", "voicemail")}.mp3')
+        with open(path, 'wb') as fo:
+            fo.write(resp.content)
+        return path
 
-        return util.XMLParser(self, page, getter)
-
-    def __messages_post(self, page, *msgs, **data):
+    # ----------------------------------------------------------------- #
+    # Sending
+    # ----------------------------------------------------------------- #
+    def send_sms(
+        self,
+        recipient: str,
+        text: str,
+        *,
+        thread_id: str | None = None,
+        recaptcha: list | None = None,
+    ) -> dict:
         """
-        Performs message operations, eg deleting,staring,moving
-        """
-        if len(msgs) != 1:
-            raise NotImplementedError("Only supports one message")
-        for msg in msgs:
-            if isinstance(msg, util.Message):
-                msg = msg.id
-            data['messages'] = msg
-        return self.__do_special_page(page, data)
+        Send an SMS ``text`` to ``recipient`` (E.164, e.g. ``+12085551234``).
 
-    _Message__messages_post = __messages_post
+        If ``thread_id`` is given the message is sent into that existing
+        conversation (e.g. a ``g.Group Message.<id>`` group thread); otherwise
+        it is derived from ``recipient`` (``t.<E.164>``).
+
+        .. important::
+           Unlike reads and state changes, Google gates *sending* behind
+           reCAPTCHA Enterprise + BotGuard anti-abuse tokens (the final element
+           of the body), which can only be produced by executing Google's
+           JavaScript in a browser.  Prefer :class:`googlevoice.browser.
+           BrowserSender`, which drives a browser to mint those and send.  This
+           low-level method only sends if you pass a pre-minted ``recaptcha``
+           payload (``["!<botguard-token>"]``); without it Google returns 429.
+        """
+        tid = thread_id or _thread_id_for(recipient)
+        nonce = int(time.time() * 1000)
+        # protojson body for api2thread/sendsms, verified from live traffic:
+        # four leading nulls, text, thread id, two nulls, [nonce], null, then
+        # the reCAPTCHA/anti-abuse token payload.
+        body = [None, None, None, None, text, tid, None, None, [nonce], None, recaptcha]
+        return self._call('api2thread/sendsms', body)
+
+
+def _thread_id_for(recipient: str) -> str:
+    """Map a recipient to a thread id (``t.<E.164>``); pass ids through."""
+    normalized = normalize_number(recipient)
+    if normalized.startswith(_ID_PREFIXES):
+        return normalized
+    return 't.' + normalized

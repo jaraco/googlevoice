@@ -1,15 +1,15 @@
 """
-This project aims to bring the power of the Google Voice API to
-the Python language in a simple,
-easy-to-use manner. Currently it allows one to place calls, send sms,
-download voicemails/recorded messages, and search the various
-folders of Google Voice Accounts.
-Use the Python API or command line script to schedule
-calls, check for new received calls/sms,
-or even sync recorded voicemails/calls.
+A Python client for the modern Google Voice web API.
+
+Read your conversations, calls and voicemails (with transcripts and audio
+download), search, and manage threads (archive, spam, block, mark read) -- all
+as plain HTTP, no browser. Sending SMS (including group messages) is gated by
+Google's anti-abuse tokens, so it is done by driving the real web app; see
+:mod:`googlevoice.browser`.
 """
 
-from .util import Folder, Message, Phone
+from .auth import Credentials
+from .util import Message, Thread
 from .voice import Voice
 
-__all__ = ['Voice', 'Phone', 'Message', 'Folder']
+__all__ = ['Credentials', 'Message', 'Thread', 'Voice']

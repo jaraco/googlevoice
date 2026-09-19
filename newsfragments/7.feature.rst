@@ -1,0 +1,1 @@
+Added SMS sending against the new API via ``googlevoice.browser.BrowserSender`` (and ``python -m googlevoice send``). Because Google gates sending behind reCAPTCHA/BotGuard anti-abuse tokens, sending drives a real browser to mint them; it reuses the profile created by ``login``.

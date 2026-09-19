@@ -2,46 +2,35 @@
 
 
 Examples
-=========
+========
 
-All of these can be found in the examples directory
+These can be found in the ``examples`` directory. Run
+``python -m googlevoice.auth login`` once first (see :ref:`auth`).
 
-Place calls
---------------
-.. literalinclude:: ../examples/call.py
-
-Download MP3s
--------------
-.. literalinclude:: ../examples/download-mp3.py
-
-Send SMS messages
-------------------
-.. literalinclude:: ../examples/sms.py
-
-``Phones``
------------
-.. literalinclude:: ../examples/phones.py
-
-``Folders``
-------------
-.. literalinclude:: ../examples/folders.py
-
-Search
-------
-.. literalinclude:: ../examples/search.py
+Read recent conversations
+--------------------------
+.. literalinclude:: ../examples/read_inbox.py
 
 List voicemails
-----------------
+---------------
 .. literalinclude:: ../examples/voicemail.py
 
-Delete ``Messages``
+Download voicemail audio
+------------------------
+.. literalinclude:: ../examples/download-mp3.py
+
+List the folders
+----------------
+.. literalinclude:: ../examples/folders.py
+
+Search conversations
 --------------------
+.. literalinclude:: ../examples/search.py
+
+Tidy the inbox (archive read threads)
+-------------------------------------
 .. literalinclude:: ../examples/delete.py
 
-Parse received SMS
--------------------
-.. literalinclude:: ../examples/parse_sms.py
-
-List account settings
-----------------------
-.. literalinclude:: ../examples/settings.py
+Send an SMS
+-----------
+.. literalinclude:: ../examples/sms.py

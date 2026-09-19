@@ -7,63 +7,43 @@ API Reference
 .. automodule:: googlevoice
 
 Voice
+-----
+
+Reading from Google Voice (account info, conversations, messages) is a plain
+HTTP client and needs no browser.
+
+.. autoclass:: googlevoice.Voice
+   :members:
+
+Thread
 ------
 
-In addition to the methods below, ``Voice`` instances have several special methods for
-gathering information from folders in the Google Voice service. These methods are:
-
-  * ``inbox`` - Recent, unread messages
-  * ``starred`` - Starred messages
-  * ``all`` - All messages
-  * ``spam`` - Messages likely to be spam
-  * ``trash`` - Deleted messages
-  * ``voicemail`` - Voicemail messages
-  * ``sms`` - Text messages
-  * ``recorded`` - Recorced messages
-  * ``placed`` - Outgoing messages
-  * ``received`` - Incoming messages
-  * ``missed`` - Messages not received
-
-All of these special methods operate the same way. When they are called,
-they parse the feed from the Google Voice service and return a ``Folder`` instance.
-After they have been called, you can grab the JSON and HTML data directly.
-
-Usage::
-
-   >>> voice.inbox()       # Parses feed and returns Folder instance
-   ... <Folder inbox (9)>
-   >>> voice.inbox.json    # Raw JSON data
-   ... u'{"messages":{"14ef89...'
-   >>> voice.inbox.html    # Raw HTML data
-   ... u'\n\n  \n<div id="14fe89...'
-   >>> voice.inbox.folder  # Just returns Folder instance
-   ... <Folder inbox (9)>
-
-.. autoclass:: Voice
-   :members:
-
-Folder
----------------
-
-.. automodule:: googlevoice.util
-
-.. autoclass:: Folder
-   :members:
-
-Phone
----------------
-
-.. autoclass:: Phone
+.. autoclass:: googlevoice.Thread
    :members:
 
 Message
----------------
+-------
 
-.. autoclass:: Message
+.. autoclass:: googlevoice.Message
    :members:
 
-XMLParser
----------------
+Credentials
+-----------
 
-.. autoclass:: XMLParser
+.. autoclass:: googlevoice.Credentials
    :members:
+
+BrowserSender
+-------------
+
+Sending SMS requires browser-minted anti-abuse tokens, so it is handled
+separately by driving the real web app.
+
+.. autoclass:: googlevoice.browser.BrowserSender
+   :members:
+
+Authentication
+--------------
+
+.. automodule:: googlevoice.auth
+   :members: browser_login, session_is_valid, save_session, load_session
