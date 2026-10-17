@@ -7,6 +7,16 @@ from xml.parsers.expat import ParserCreate
 def validate_response(response):
     """
     Validates that the JSON response is A-OK
+
+    >>> validate_response({'ok': True})
+    >>> validate_response({'ok': False})
+    Traceback (most recent call last):
+    ...
+    googlevoice.util.ValidationError: There was a problem with GV: {'ok': False}
+    >>> validate_response({})
+    Traceback (most recent call last):
+    ...
+    googlevoice.util.ValidationError: There was a problem with GV: {}
     """
     if not response.get('ok'):
         raise ValidationError(f'There was a problem with GV: {response}')
