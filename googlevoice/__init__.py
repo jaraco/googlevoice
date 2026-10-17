@@ -12,4 +12,4 @@ or even sync recorded voicemails/calls.
 from .util import Folder, Message, Phone
 from .voice import Voice
 
-__all__ = ['Voice', 'Phone', 'Message', 'Folder']
+__all__ = ['Folder', 'Message', 'Phone', 'Voice']

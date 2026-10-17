@@ -8,7 +8,7 @@ def validate_response(response):
     """
     Validates that the JSON response is A-OK
     """
-    if not ('ok' in response and response['ok']):
+    if not response.get('ok'):
         raise ValidationError(f'There was a problem with GV: {response}')
 
 

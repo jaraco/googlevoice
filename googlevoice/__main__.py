@@ -64,7 +64,6 @@ def login(email, passwd, batch):
     """
     Login Voice instance based on options and interactivity
     """
-    global voice
     try:
         voice.login(email, passwd)
     except LoginError:
@@ -78,7 +77,6 @@ def login(email, passwd, batch):
 
 
 def logout():
-    global voice
     print('Logging out of voice...')
     voice.logout()
 
@@ -159,9 +157,18 @@ def handle_action(voice, action):
         download=download,
         help=functools.partial(print, parser.usage),
     )
-    folder_names = (
-        'trash spam inbox voicemail all starred missed received recorded sms'.split()
-    )
+    folder_names = [
+        'trash',
+        'spam',
+        'inbox',
+        'voicemail',
+        'all',
+        'starred',
+        'missed',
+        'received',
+        'recorded',
+        'sms',
+    ]
     fn_map.update(
         (name, functools.partial(pprint_folder, name)) for name in folder_names
     )
@@ -173,7 +180,7 @@ def run_other(voice, action, args):
     if action == 'send_sms':
         try:
             num, args = args[0], args[1:]
-        except Exception:
+        except IndexError:
             print('Please provide a message')
             exit(0)
         args = (num, ' '.join(args))
@@ -181,7 +188,7 @@ def run_other(voice, action, args):
 
 
 def main():
-    options, args = parser.parse_args()
+    _options, args = parser.parse_args()
 
     try:
         action, args = args[0], args[1:]
@@ -192,6 +199,7 @@ def main():
         print(parser.usage)
         exit(0)
 
+    global voice
     voice = Voice()
     login()
 

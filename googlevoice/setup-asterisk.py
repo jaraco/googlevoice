@@ -94,9 +94,8 @@ def main():
     """
 
     try:
-        fo = open(conf, 'a')
-        fo.write(content % settings)
-        fo.close()
+        with open(conf, 'a') as fo:
+            fo.write(content % settings)
     except OSError:
         print(f'Error opening file for writing: {conf}')
         exit(0)

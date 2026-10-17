@@ -101,7 +101,7 @@ class TestVoice:
         voice.phones[0].enable()
 
     def test_download(self, voice, tmpdir):
-        msg = list(voice.voicemail().messages)[0]
+        msg = next(iter(voice.voicemail().messages))
         fn = f'{msg.id}.mp3'
         with tmpdir.as_cwd():
             voice.download(msg)
